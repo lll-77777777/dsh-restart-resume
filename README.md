@@ -10,8 +10,20 @@
 | 命令行手动 | `powershell -NoProfile -ExecutionPolicy Bypass -File restart-dsh.ps1` |
 | 只停不启 | `restart-dsh.ps1 -NoStart` |
 | 只检查、不重启 | `restart-dsh.ps1 -VerifyOnly` |
-| 自定义等待时长 | `restart-dsh.ps1 -TimeoutSec 120` |
+| 自定义等待时长（等 web 端口就绪的上限） | `restart-dsh.ps1 -TimeoutSec 120`（默认 90 秒） |
 | **从 DSH 会话 / 插件 / Agent 内部触发** | `powershell -File restart-dsh-launch.ps1` —— 走计划任务，脱离 DSH 进程树，不会被连带杀掉 |
+| 延迟 N 秒再重启（等手头任务跑完） | `powershell -File restart-dsh-launch.ps1 -DelaySec 30` |
+
+### 能调的三个时间
+
+| 时间 | 参数 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| 重启前延迟 | `restart-dsh-launch.ps1 -DelaySec N` | 0（立即） | 先等 N 秒再触发重启 |
+| 等 DSH 起来的上限 | `restart-dsh.ps1 -TimeoutSec N` | 90 秒 | 超过就记 ❌；DSH 冷启动一般 10~40 秒，别设太小 |
+| 重启后自动继续的提醒延迟 | 改 `resume-delay.txt` 里的数字（秒） | 30 秒 | 设得比重启耗时略短，重启一完成就补发、几乎无缝；90/180 秒反而要干等 |
+
+> 原理：提醒在 DSH 关闭期间到期 → 重启恢复后立即补发。所以「设短」不是更危险，而是更快。
+> 自定义：用记事本打开同目录 `resume-delay.txt`，改里面的秒数（如 45 / 60），保存即可；技能 `dsh-restart-resume` 会读它。
 
 ## 日志
 
@@ -22,11 +34,11 @@
 重启会杀掉「正在跑的那一轮任务」，但 DSH 的定时提醒（schedule）**会持久化，并在重启后补发**。
 所以只要在重启前埋一条提醒，重启后就被自动叫醒继续：
 
-1. 重启前，在当前会话里调用 `schedule_create`（2~3 分钟后），例如：
+1. 重启前，在当前会话里调用 `schedule_create`（**延迟自己定**，推荐 30 秒——DSH 重启约 12~40 秒，设得比它略短，重启一完成就补发、几乎无缝），例如：
    ```json
-   { "after_seconds": 180, "title": "重启后继续", "prompt": "重启已完成，请继续上次未完成的任务" }
+   { "after_seconds": 30, "title": "重启后继续", "prompt": "重启已完成，请继续上次未完成的任务" }
    ```
-2. 立刻执行 `restart-dsh-launch.ps1` 重启
+2. 立刻执行 `restart-dsh-launch.ps1` 重启（想先等手头任务跑完就加 `-DelaySec 30`）
 3. DSH 起来、会话恢复时，这条错过的提醒会被补发 → agent 自动接着干
 
 注意：

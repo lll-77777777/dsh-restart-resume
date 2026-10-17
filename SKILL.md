@@ -11,18 +11,27 @@ description: 需要重启 DeepSeek Harness（DSH）时使用——先在本会�
 
 ## 步骤
 
-1. **先埋提醒**（在当前会话里）：
+1. **读「重启后继续」的等待时间**（可在文件里自己改，不用叫 agent）：
    ```
-   schedule_create(after_seconds=180, title="重启后继续", prompt="重启已完成，请继续上次未完成的任务")
+   C:\Users\ireina\.dsh\tools\restart-dsh\resume-delay.txt
    ```
-   180 秒足够覆盖重启（约 15 秒）+ 会话恢复；太短可能在 DSH 起来前就过期。
+   - 里面就一个数字（秒），默认 `30`
+   - 读出来用它；文件不存在/不是数字 → 回退默认 30
+   - 想改：用记事本打开改成 15 / 45 / 60 等，保存即可
 
-2. **触发重启**（走计划任务，脱离 DSH 进程树，不会被连带杀掉）：
+2. **先埋提醒**（在当前会话里，`after_seconds` 用上一步读到的值）：
+   ```
+   schedule_create(after_seconds=30, title="重启后继续", prompt="重启已完成，请继续上次未完成的任务")
+   ```
+   **设短一点反而更快**：DSH 重启实测约 12~40 秒；把 `after_seconds` 设得**比重启耗时略短**（30 秒左右），提醒就会在 DSH 关闭期间到期，重启一完成立刻补发，几乎无缝继续。设成 90/180 秒反而要干等到点。想稳一点就 45~60 秒。
+
+3. **触发重启**（走计划任务，脱离 DSH 进程树，不会被连带杀掉）：
    ```
    powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\ireina\.dsh\tools\restart-dsh\restart-dsh-launch.ps1"
    ```
+   想「先等手头任务跑完再重启」：加 `-DelaySec 30`（等 30 秒再触发）。
 
-3. **等补发**：DSH 重启后，到点时那条错过的提醒会补发到原会话，agent 自动被叫醒，继续干活。
+4. **等补发**：DSH 重启后，到点时那条错过的提醒会补发到原会话，agent 自动被叫醒，继续干活。
 
 ## 原理
 

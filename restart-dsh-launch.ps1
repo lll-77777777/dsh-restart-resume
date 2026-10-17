@@ -8,11 +8,12 @@
     用计划任务（任务计划程序启动的进程与 DSH 进程树无关）执行 restart-dsh.ps1。
   用法：
     powershell -NoProfile -ExecutionPolicy Bypass -File restart-dsh-launch.ps1
-    （可选 -NoStart 只重启不等待；-VerifyOnly 只验证不重启）
+    （可选 -NoStart 只重启不等待；-VerifyOnly 只验证不重启；-DelaySec 先等 N 秒再重启）
 #>
 param(
   [switch]$NoStart,
-  [switch]$VerifyOnly
+  [switch]$VerifyOnly,
+  [int]$DelaySec = 0
 )
 $ErrorActionPreference = 'SilentlyContinue'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -22,6 +23,13 @@ $extra = ''
 if ($NoStart) { $extra = ' -NoStart' }
 if ($VerifyOnly) { $extra = ' -VerifyOnly' }
 $tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$ps1`"$extra"
+
+# 可选：先等 N 秒再重启（让你手头的任务先跑完）
+if ($DelaySec -gt 0) {
+  Write-Host "⏳ 先等 $DelaySec 秒，再触发重启…"
+  Start-Sleep -Seconds $DelaySec
+}
+
 $at = (Get-Date).AddMinutes(5)
 
 & schtasks.exe /Delete /TN $task /F 2>$null | Out-Null
