@@ -7,12 +7,26 @@
 | 场景 | 命令 |
 | --- | --- |
 | 双击（最省事） | `restart-dsh.vbs` —— 静默重启，不闪窗口 |
+| 双击（全静默） | `restart-dsh-hidden.vbs` —— 完全无窗口，连终端都不闪 |
 | 命令行手动 | `powershell -NoProfile -ExecutionPolicy Bypass -File restart-dsh.ps1` |
 | 只停不启 | `restart-dsh.ps1 -NoStart` |
 | 只检查、不重启 | `restart-dsh.ps1 -VerifyOnly` |
 | 自定义等待时长（等 web 端口就绪的上限） | `restart-dsh.ps1 -TimeoutSec 120`（默认 90 秒） |
+| 后台重启（最小化、不抢焦点） | `restart-dsh.ps1 -Background` |
 | **从 DSH 会话 / 插件 / Agent 内部触发** | `powershell -File restart-dsh-launch.ps1` —— 走计划任务，脱离 DSH 进程树，不会被连带杀掉 |
+| 从会话内部触发 + 全静默 | `restart-dsh-launch.ps1 -Hidden` —— 计划任务用 wscript 跑 vbs，连 PowerShell 窗口都不弹 |
 | 延迟 N 秒再重启（等手头任务跑完） | `powershell -File restart-dsh-launch.ps1 -DelaySec 30` |
+
+### 全屏保护（不会打断你正在看的东西）
+
+重启时如果检测到**前台有应用占满整个屏幕**（全屏游戏 / 全屏视频），会自动按「最小化 + 不抢焦点」的方式启动 DSH：
+你的全屏不会被踢出来，DSH 窗口出现在任务栏（最小化状态），点一下就能用。
+
+- 检测方式：`GetForegroundWindow` 的窗口矩形 == 所在显示器的完整矩形（多屏按前台窗口那块屏判断）
+- Electron 启动时不认 `-WindowStyle Minimized`，所以脚本会在窗口句柄出现后（最多等 20 秒）用 `ShowWindow(SW_MINIMIZE)` 补一次
+- 不在全屏但你想强制后台：`-Background`
+- 从 DSH 会话里自动重启：`restart-dsh-launch.ps1 -Hidden`（wscript 全静默，配合全屏保护就是「你干你的，DSH 自己默默重启」）
+
 
 ### 能调的三个时间
 

@@ -8,21 +8,37 @@
     用计划任务（任务计划程序启动的进程与 DSH 进程树无关）执行 restart-dsh.ps1。
   用法：
     powershell -NoProfile -ExecutionPolicy Bypass -File restart-dsh-launch.ps1
-    （可选 -NoStart 只重启不等待；-VerifyOnly 只验证不重启；-DelaySec 先等 N 秒再重启）
+    （可选：
+      -NoStart      只停不启动
+      -VerifyOnly   只验证不重启
+      -DelaySec N   先等 N 秒再重启
+      -Hidden       完全静默（不弹任何窗口，走 wscript）
+      -Background   后台最小化启动 DSH（不抢焦点；全屏时自动生效）
+    ）
 #>
 param(
   [switch]$NoStart,
   [switch]$VerifyOnly,
-  [int]$DelaySec = 0
+  [int]$DelaySec = 0,
+  [switch]$Hidden,
+  [switch]$Background
 )
 $ErrorActionPreference = 'SilentlyContinue'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ps1 = Join-Path $here 'restart-dsh.ps1'
+$vbs = Join-Path $here 'restart-dsh-hidden.vbs'
 $task = 'DSH-RestartOnce'
+
 $extra = ''
-if ($NoStart) { $extra = ' -NoStart' }
-if ($VerifyOnly) { $extra = ' -VerifyOnly' }
-$tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$ps1`"$extra"
+if ($NoStart) { $extra += ' -NoStart' }
+if ($VerifyOnly) { $extra += ' -VerifyOnly' }
+if ($Background) { $extra += ' -Background' }
+
+if ($Hidden) {
+  $tr = "wscript.exe //nologo `"$vbs`"$extra"
+} else {
+  $tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$ps1`"$extra"
+}
 
 # 可选：先等 N 秒再重启（让你手头的任务先跑完）
 if ($DelaySec -gt 0) {

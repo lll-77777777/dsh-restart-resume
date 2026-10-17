@@ -2,20 +2,25 @@
   restart-dsh.ps1 —— 重启 DeepSeek Harness（全局工具，不属于任何插件）
   ============================================================================
   用法：
-    .\restart-dsh.ps1              # 重启 + 等 web 就绪 + 写日志（默认）
-    .\restart-dsh.ps1 -NoStart     # 只停，不启动
-    .\restart-dsh.ps1 -VerifyOnly  # 只检查当前 DSH 是否健康（不重启）
-    .\restart-dsh.ps1 -TimeoutSec 120   # 等多久（默认 90 秒）
+    .\restart-dsh.ps1                  # 重启 + 等 web 就绪 + 写日志（默认）
+    .\restart-dsh.ps1 -NoStart         # 只停，不启动
+    .\restart-dsh.ps1 -VerifyOnly      # 只检查当前 DSH 是否健康（不重启）
+    .\restart-dsh.ps1 -TimeoutSec 120  # 等多久（默认 90 秒）
+    .\restart-dsh.ps1 -Background      # 强制后台启动（最小化、不抢焦点）
 
-  静默运行（不弹窗）：wscript //nologo restart-dsh.vbs
-  从 DSH 会话 / 插件 / Agent 内部触发：restart-dsh-launch.ps1（走计划任务，脱离 DSH 进程树）
+  全屏保护：检测到前台有应用占满整个屏幕（全屏游戏/视频）时，
+  自动以「最小化 + 不抢焦点」方式启动 DSH，不打断你正在看的东西。
+
+  静默运行（不弹终端窗口）：wscript //nologo restart-dsh-hidden.vbs
+  从 DSH 会话 / 插件 / Agent 内部触发：restart-dsh-launch.ps1 -Hidden
   日志：同目录 restart.log
   ============================================================================
 #>
 param(
   [switch]$NoStart,
   [switch]$VerifyOnly,
-  [int]$TimeoutSec = 90
+  [int]$TimeoutSec = 90,
+  [switch]$Background
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -57,6 +62,57 @@ function Test-Tcp([int]$port) {
   } catch { return $false } finally { $c.Close() }
 }
 
+# ---------- 全屏检测（前台窗口是否盖满整个显示器） ----------
+function Test-ForegroundFullscreen {
+  try {
+    if (-not ('BrFullscreen' -as [type])) {
+      Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public class BrFullscreen {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+  [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  public struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public uint dwFlags; }
+  public static bool IsFullscreen() {
+    IntPtr h = GetForegroundWindow();
+    if (h == IntPtr.Zero) return false;
+    RECT r;
+    if (!GetWindowRect(h, out r)) return false;
+    MONITORINFO mi = new MONITORINFO();
+    mi.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+    IntPtr mon = MonitorFromWindow(h, 2);
+    if (!GetMonitorInfo(mon, ref mi)) return false;
+    return r.Left <= mi.rcMonitor.Left && r.Top <= mi.rcMonitor.Top
+        && r.Right >= mi.rcMonitor.Right && r.Bottom >= mi.rcMonitor.Bottom;
+  }
+}
+'@
+    }
+    return [BrFullscreen]::IsFullscreen()
+  } catch { return $false }
+}
+
+# 把窗口最小化但不激活（不抢前台焦点）
+function Set-WindowMinimized([IntPtr]$hWnd) {
+  if ($hWnd -eq [IntPtr]::Zero) { return }
+  try {
+    if (-not ('BrShowWin' -as [type])) {
+      Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public class BrShowWin {
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+}
+'@
+    }
+    [void][BrShowWin]::ShowWindow($hWnd, 6)   # SW_MINIMIZE：最小化、不激活
+  } catch { }
+}
+
 # ---------- 1) 可选：重启 ----------
 if (-not $VerifyOnly) {
   $main = Get-MainProc
@@ -71,8 +127,36 @@ if (-not $VerifyOnly) {
     Write-RestartLog '只停不启动（-NoStart），结束'
     exit 0
   }
+
+  # 全屏保护：全屏时自动后台最小化
+  $fs = Test-ForegroundFullscreen
+  $bg = $Background -or $fs
+  if ($fs) { Write-RestartLog '检测到前台全屏应用 → 后台最小化启动（不抢焦点）' }
+  elseif ($Background) { Write-RestartLog '后台模式（-Background）→ 最小化启动' }
+
   Write-RestartLog '启动 DSH…'
-  Start-Process -FilePath $exe
+  if ($bg) {
+    Start-Process -FilePath $exe -WindowStyle Minimized
+    # 窗口句柄要过几秒才出现：等它出现后立刻最小化（Electron 不认 -WindowStyle，必须 ShowWindow）
+    $winDeadline = (Get-Date).AddSeconds(20)
+    $winDone = $false
+    $lastHwnd = [IntPtr]::Zero
+    while ((Get-Date) -lt $winDeadline) {
+      Start-Sleep -Milliseconds 700
+      $winProc = Get-Process 'DeepSeek Harness' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+      if ($winProc) {
+        $lastHwnd = $winProc.MainWindowHandle
+        Set-WindowMinimized $lastHwnd
+        Start-Sleep -Milliseconds 300
+        $winDone = $true
+        break
+      }
+    }
+    if ($winDone) { Write-RestartLog 'DSH 窗口已最小化（不激活）' }
+    else { Write-RestartLog 'DSH 主窗口 20 秒内没出现（会继续在后台完成启动）' }
+  } else {
+    Start-Process -FilePath $exe
+  }
 }
 
 # ---------- 2) 等 DSH web 端口就绪 ----------
