@@ -62,6 +62,26 @@ Write-WatchLog 'restart requested (restart-request.txt found)'
 
 if (-not (Test-Path -LiteralPath $work)) { exit 0 }
 
+# Game guard: never restart DSH automatically while a game is running. Killing
+# and respawning the Electron GPU context tears down exclusive-fullscreen
+# games, so an automatic restart can close the game. Owner asked: ask first, he
+# restarts himself. The automatic path just backs off and drops the request.
+# NOTE: keep this text pure ASCII (see the header note).
+$gameNames = @(
+  'LeagueClient', 'LeagueClientUx', 'League of Legends', 'RiotClientServices',
+  'VALORANT', 'VALORANT-Win64-Shipping', 'cs2', 'dota2',
+  'GenshinImpact', 'YuanShen', 'StarRail', 'HonkaiStarRail', 'Overwatch', 'steam'
+)
+$games = @()
+foreach ($n in $gameNames) {
+  if (Get-Process -Name $n -ErrorAction SilentlyContinue) { $games += $n }
+}
+if ($games.Count -gt 0) {
+  Write-WatchLog ("game running ({0}) -> restart skipped, waiting for owner" -f ($games -join ', '))
+  Remove-Item -LiteralPath $work -Force -ErrorAction SilentlyContinue
+  exit 0
+}
+
 Write-WatchLog 'running restart-dsh.ps1'
 try {
   # Capture the child script's output as Unicode text and write it through

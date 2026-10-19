@@ -11,6 +11,14 @@ description: 需要重启 DeepSeek Harness（DSH）时使用——先在本会�
 
 ## 步骤
 
+0. **先看有没有游戏在跑 —— 最重要的前置检查**：
+   ```
+   powershell -NoProfile -Command "Get-Process -Name 'LeagueClient','LeagueClientUx','League of Legends','RiotClientServices','VALORANT','cs2','dota2','GenshinImpact','YuanShen','StarRail','HonkaiStarRail','Overwatch','steam' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name -Unique"
+   ```
+   - **有输出 → 不要重启**。用 `ask_user_question` 问主人：「你在打游戏，等打完我再重启，还是你自己手动重启？」
+   - 原因：重启 DSH 会停掉并重启 Electron 的 GPU 上下文，独占全屏的游戏（尤其英雄联盟）会被系统直接断掉——2026-10-19 真的把主人正在打的 LoL 关了一次。
+   - `watchdog.ps1` 那条自动路径也已加同样的保护：检测到游戏就放弃本次重启、只写日志。
+
 1. **读「重启后继续」的等待时间**（可在文件里自己改，不用叫 agent）：
    ```
    C:\Users\ireina\.dsh\tools\restart-dsh\resume-delay.txt
@@ -27,11 +35,11 @@ description: 需要重启 DeepSeek Harness（DSH）时使用——先在本会�
 
 3. **触发重启**（走计划任务，脱离 DSH 进程树，不会被连带杀掉）：
    ```
-   powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\ireina\.dsh\tools\restart-dsh\restart-dsh-launch.ps1"
+   powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\ireina\.dsh\tools\restart-dsh\restart-dsh-launch.ps1" -Hidden
    ```
    想「先等手头任务跑完再重启」：加 `-DelaySec 30`（等 30 秒再触发）。
 
-   > 备用通道：若本机装了看门狗计划任务（`DSH-RestartWatchdog`，见 README「看门狗」一节），也可以只往 `C:\Users\ireina\.dsh\tools\restart-dsh\restart-request.txt` 写一个文件，最长等 60 秒它就会动手。适合 `restart-dsh-launch.ps1` 被沙箱/权限挡住时。
+   **全屏保护**：`restart-dsh.ps1` 会检测前台是否有全屏应用（全屏游戏/视频）。有的话自动以「最小化 + 不抢焦点」启动 DSH，不会把你从全屏里踢出来；DSH 窗口会出现在任务栏（最小化），点一下就能用。不在全屏但想强制后台：加 `-Background`。从会话里触发加 `-Hidden` 就全程静默（计划任务用 wscript 跑 vbs，连 PowerShell 窗口都不弹）。
 
 4. **等补发**：DSH 重启后，到点时那条错过的提醒会补发到原会话，agent 自动被叫醒，继续干活。
 
