@@ -1,2 +1,4 @@
 restart.log
-
+watchdog.log
+*.bak-*
+probe2.*

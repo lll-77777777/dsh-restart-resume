@@ -31,6 +31,8 @@ description: 需要重启 DeepSeek Harness（DSH）时使用——先在本会�
    ```
    想「先等手头任务跑完再重启」：加 `-DelaySec 30`（等 30 秒再触发）。
 
+   > 备用通道：若本机装了看门狗计划任务（`DSH-RestartWatchdog`，见 README「看门狗」一节），也可以只往 `C:\Users\ireina\.dsh\tools\restart-dsh\restart-request.txt` 写一个文件，最长等 60 秒它就会动手。适合 `restart-dsh-launch.ps1` 被沙箱/权限挡住时。
+
 4. **等补发**：DSH 重启后，到点时那条错过的提醒会补发到原会话，agent 自动被叫醒，继续干活。
 
 ## 原理

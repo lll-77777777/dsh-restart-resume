@@ -39,6 +39,36 @@
 > 原理：提醒在 DSH 关闭期间到期 → 重启恢复后立即补发。所以「设短」不是更危险，而是更快。
 > 自定义：用记事本打开同目录 `resume-delay.txt`，改里面的秒数（如 45 / 60），保存即可；技能 `dsh-restart-resume` 会读它。
 
+## 看门狗（watchdog）：让 DSH 会话自己触发重启
+
+DSH 会话里 spawn 的进程被 Windows ACL 挡在任务计划存储之外（`schtasks` 全报「系统找不到指定的路径」，`Get-ScheduledTask`/`Start-ScheduledTask` 全报拒绝访问），所以会话**不能**自己建/触发计划任务。看门狗把这条通路倒过来：会话只负责**放一个文件**，真正动手的是计划任务。
+
+1. 用户手动建一次计划任务（管理员 PowerShell，`/sc minute /mo 1` 每分钟一次）：
+   ```
+   schtasks /create /tn DSH-RestartWatchdog /sc minute /mo 1 ^
+     /tr "wscript.exe \"C:\Users\ireina\.dsh\tools\restart-dsh\watchdog-hidden.vbs\""
+   ```
+2. 之后任何 DSH 会话只要往同目录写 `restart-request.txt`，**一分钟内**看门狗就会捡到并重启 DSH。
+
+| 文件 | 作用 |
+| --- | --- |
+| `watchdog.ps1` | 计划任务每分钟跑一次；捡到请求 → 改名 `.working` 抢占（防重入）→ 跑 `restart-dsh.ps1` → 清 `.working` |
+| `watchdog-hidden.vbs` | 用 wscript 以 `intWindowStyle=0` 启动 `watchdog.ps1`，**完全不闪窗口**（计划任务直接跑 powershell.exe 会每分钟闪一次黑框） |
+| `watchdog-ping.txt` | 心跳自检：丢了它 → 看门狗只写日志 `heartbeat ok`，不重启（放完自动删） |
+| `watchdog.log` | 看门狗日志（与 `restart.log` 分开） |
+
+判定看门狗活着看 `watchdog.log` 里有没有 `restart requested`；轮询周期 60 秒，**写完请求至少等 90 秒再下结论**，别在周期内判死。
+
+两个必须遵守的坑：
+
+- `watchdog.ps1`、`watchdog-hidden.vbs` 必须保持**纯 ASCII**——PowerShell 5.1 读无 BOM 的 .ps1 时按 ANSI 解析，中文注释会直接把脚本解析失败。
+- 子脚本（`restart-dsh.ps1`）的输出**不能**用 `*>> $logFile` 直接重定向：那样会按控制台代码页（简体中文 = GBK）写进 UTF-8 日志，中文全变 `\Pbk DSH` 这种乱码。正确做法是
+  ```powershell
+  $out = & (Join-Path $here 'restart-dsh.ps1') *>&1 | Out-String
+  foreach ($line in ($out -split "`r?`n")) { if ($line.Trim()) { Write-WatchLog $line.TrimEnd() } }
+  ```
+  先捕获成 Unicode 字符串再逐行走 `Add-Content -Encoding UTF8`；`*>&1` 还能把 `Write-Host` 的 Information 流一起捞进来。
+
 ## 日志
 
 同目录 `restart.log`，每次重启写：停止（PID）→ 启动 → web 端口就绪 → 主进程/进程数 → 完成。
